@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tomcat configuration for the PQC experiment. Two connectors, deliberately,
+  because they demonstrate the two halves of the post-quantum transition and
+  the ecosystem currently supports them very differently.
+
+    8443  Full post-quantum: an ML-DSA-65 certificate chain (authentication)
+          plus ML-KEM hybrid key exchange (confidentiality). Verifiable with
+          openssl s_client. Browsers cannot yet validate ML-DSA chains, so
+          this port is for tooling, not for a padlock.
+
+    8444  Classical ECDSA certificate chain with ML-KEM hybrid key exchange —
+          "UC1" in the chapter. This is what a browser can do today: a real
+          padlock and post-quantum confidentiality, with authentication still
+          classical. It is also the configuration most enterprises should
+          deploy first, because it addresses harvest-now-decrypt-later without
+          touching the certificate estate.
+
+  The single attribute that matters on both is sslImplementationName: it routes
+  TLS through OpenSSL via the Foreign Function & Memory API rather than JSSE,
+  which is what makes ML-DSA and ML-KEM available at all. Note the camelCase —
+  Tomcat rejects unknown attributes with a WARNING and starts anyway, so a
+  misspelling yields a server that runs and serves nothing.
+
+  Certificates are PEM files rather than keystores: the OpenSSL implementation
+  expects them, and it sidesteps the JDK's inability to parse OpenSSL-written
+  ML-DSA private keys from PKCS#12.
+-->
+<Server port="8005" shutdown="SHUTDOWN">
+  <Listener className="org.apache.catalina.core.AprLifecycleListener" />
+  <Service name="Catalina">
+
+    <!-- Full PQC: ML-DSA authentication + ML-KEM key exchange -->
+    <Connector port="8443"
+               protocol="org.apache.coyote.http11.Http11NioProtocol"
+               SSLEnabled="true"
+               sslImplementationName="org.apache.tomcat.util.net.openssl.panama.OpenSSLImplementation"
+               maxThreads="50">
+      <!-- ciphers + honorCipherOrder: without honorCipherOrder the server
+           follows the CLIENT's preference, which is why Chrome negotiates
+           AES-128 while openssl s_client negotiates AES-256 against an
+           otherwise identical server. Measured, not assumed. Note this sets
+           a preference, not a restriction: a client offering only AES-128
+           still gets it. See the CNSA 2.0 chapter. -->
+      <SSLHostConfig protocols="TLSv1.3"
+                     ciphers="TLS_AES_256_GCM_SHA384"
+                     honorCipherOrder="true">
+        <Certificate certificateKeyFile="/opt/pki/server.key"
+                     certificateFile="/opt/pki/server.crt"
+                     certificateChainFile="/opt/pki/ca.crt" />
+      </SSLHostConfig>
+    </Connector>
+
+    <!-- Browser-compatible: classical ECDSA chain + ML-KEM key exchange -->
+    <Connector port="8444"
+               protocol="org.apache.coyote.http11.Http11NioProtocol"
+               SSLEnabled="true"
+               sslImplementationName="org.apache.tomcat.util.net.openssl.panama.OpenSSLImplementation"
+               maxThreads="50">
+      <!-- ciphers + honorCipherOrder: without honorCipherOrder the server
+           follows the CLIENT's preference, which is why Chrome negotiates
+           AES-128 while openssl s_client negotiates AES-256 against an
+           otherwise identical server. Measured, not assumed. Note this sets
+           a preference, not a restriction: a client offering only AES-128
+           still gets it. See the CNSA 2.0 chapter. -->
+      <SSLHostConfig protocols="TLSv1.3"
+                     ciphers="TLS_AES_256_GCM_SHA384"
+                     honorCipherOrder="true">
+        <Certificate certificateKeyFile="/opt/pki-ec/server.key"
+                     certificateFile="/opt/pki-ec/server.crt"
+                     certificateChainFile="/opt/pki-ec/ca.crt" />
+      </SSLHostConfig>
+    </Connector>
+
+    <Engine name="Catalina" defaultHost="localhost">
+      <Host name="localhost" appBase="webapps" unpackWARs="true" autoDeploy="false" />
+    </Engine>
+  </Service>
+</Server>

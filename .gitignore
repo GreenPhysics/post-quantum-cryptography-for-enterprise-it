@@ -1,0 +1,28 @@
+# Build inputs — large third-party archives whose licenses are their vendors' to distribute.
+# docker-labs/vendor/README.md says exactly what to place there and where to get it.
+docker-labs/vendor/*.tar
+docker-labs/vendor/*.tar.gz
+docker-labs/vendor/*.tgz
+docker-labs/vendor/*.zip
+
+# Lab and container scratch output. Certificates that belong in the record are committed
+# by hand under a transcripts/ directory as .pem; nothing matching these patterns ever is.
+tomcat-pqc-stores/
+docker-labs/sample-report*.html
+*.p12
+*.jks
+*.key
+*.crt
+*.csr
+*.srl
+*.pin
+.env
+
+# Generated documents and archives
+*.pdf
+*.docx
+*.zip
+
+# OS
+.DS_Store
+Thumbs.db

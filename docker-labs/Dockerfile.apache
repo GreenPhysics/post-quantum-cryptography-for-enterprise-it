@@ -1,0 +1,137 @@
+# PQC Apache — post-quantum TLS in the world's most-deployed web server,
+# on Red Hat UBI.
+#
+# Why a container: on macOS this experiment is defeated by the same platform
+# accidents that defeated Tomcat there — SIP strips DYLD_* from hardened
+# binaries, the system library is LibreSSL (no PQC), and Homebrew builds
+# compete with source builds in PATH. On Linux the loader is predictable,
+# every component below is pinned, and the result reproduces on any reader's
+# machine in two commands.
+#
+# What this image demonstrates, end to end:
+#   1. OpenSSL 3.5.x built from source, with ML-DSA and ML-KEM
+#   2. httpd 2.4.x compiled against it, RPATH-pinned so the loader cannot
+#      silently substitute a system libssl (it will, given the chance)
+#   3. A full post-quantum handshake: ML-DSA-87 chain + ML-KEM key exchange
+#   4. TLS named groups set PER VHOST via SSLOpenSSLConfCmd — the setting
+#      Tomcat's server.xml cannot express
+#   5. CNSA 2.0 STRICT posture: a classical-only client is REFUSED
+#      (exclusion, not preference — what the IETF profile requires)
+#
+# Build (tarballs in docker-labs/vendor/):
+#   openssl-3.5.7.tar, httpd-2.4.68*.tar, apr-1.7*.tar, apr-util-1.6*.tar
+#   docker build -f docker-labs/Dockerfile.apache -t pqc-apache .
+#
+# Run:
+#   docker run --rm pqc-apache verify              # run the proofs, PASS/FAIL
+#   docker run --rm -p 8443:8443 -p 8444:8444 -p 8445:8445 pqc-apache
+
+ARG UBI_TAG=latest
+ARG OPENSSL_VERSION=3.5.7
+
+# ---------------------------------------------------------------- stage 1
+# Compile OpenSSL, then httpd against it. The base image's own OpenSSL is
+# irrelevant — nothing here links it.
+FROM registry.access.redhat.com/ubi9/ubi:${UBI_TAG} AS build
+ARG OPENSSL_VERSION
+# Perl modules: OpenSSL's Configure needs FindBin and IPC::Cmd, which RHEL
+# splits out of bare "perl". pcre2-devel and expat-devel: httpd's regex
+# engine and apr-util's XML parser.
+RUN dnf install -y gcc make zlib-devel tar findutils \
+        pcre2-devel expat-devel \
+        perl perl-FindBin perl-IPC-Cmd perl-Data-Dumper perl-File-Compare \
+        perl-File-Copy perl-Pod-Html && \
+    dnf clean all
+
+COPY docker-labs/vendor/openssl-${OPENSSL_VERSION}.tar* /tmp/
+RUN cd /tmp && \
+    tar -xf openssl-${OPENSSL_VERSION}.tar* && \
+    cd openssl-${OPENSSL_VERSION} && \
+    ./Configure --prefix=/opt/openssl --libdir=lib no-docs no-tests && \
+    make -j"$(nproc)" && \
+    make install_sw install_ssldirs
+    # install_ssldirs is not optional: without it there is no default
+    # openssl.cnf and a bare `openssl req` fails. See labs/REQUIREMENTS.md.
+
+# httpd with APR built in-tree (--with-included-apr): UBI does not carry
+# apr-devel, and vendoring APR keeps the build pinned and offline-friendly.
+COPY docker-labs/vendor/httpd-*.tar* docker-labs/vendor/apr-*.tar* /tmp/
+RUN cd /tmp && \
+    tar -xf httpd-*.tar* && \
+    cd httpd-2.4.*/ && \
+    tar -xf /tmp/apr-1*.tar* -C srclib && mv srclib/apr-1* srclib/apr && \
+    tar -xf /tmp/apr-util-*.tar* -C srclib && mv srclib/apr-util-1* srclib/apr-util && \
+    LDFLAGS="-Wl,-rpath,/opt/openssl/lib" \
+    ./configure --prefix=/opt/httpd \
+        --with-included-apr \
+        --enable-ssl --with-ssl=/opt/openssl \
+        --enable-so \
+        --with-pcre=/usr/bin/pcre2-config && \
+    make -j"$(nproc)" && \
+    make install
+    # The RPATH is the load-bearing flag. Without it, mod_ssl.so resolves
+    # whatever libssl.so.3 the system provides — verified live: the identical
+    # module binds OpenSSL 3.0 (no PQC) silently when the path is absent.
+
+# ---------------------------------------------------------------- stage 2
+FROM registry.access.redhat.com/ubi9/ubi:${UBI_TAG}
+
+COPY --from=build /opt/openssl /opt/openssl
+COPY --from=build /opt/httpd   /opt/httpd
+ENV PATH="/opt/openssl/bin:/opt/httpd/bin:${PATH}" \
+    LD_LIBRARY_PATH="/opt/openssl/lib"
+# The RPATH covers httpd; LD_LIBRARY_PATH covers the openssl CLI probes.
+
+# Runtime libraries only (the -devel packages stay in stage 1).
+RUN dnf install -y pcre2 expat procps-ng && dnf clean all
+
+# Post-quantum certificate chain, generated at build time so the image is
+# self-contained. CA and leaf both ML-DSA-87 — the only signature algorithm
+# CNSA 2.0 permits for this role.
+RUN mkdir -p /opt/pki && cd /opt/pki && \
+    printf '[v3]\nbasicConstraints = CA:FALSE\nkeyUsage = critical, digitalSignature\nextendedKeyUsage = serverAuth\nsubjectAltName = DNS:localhost,IP:127.0.0.1\n' > ext.cnf && \
+    openssl genpkey -algorithm ML-DSA-87 -out ca.key && \
+    openssl req -x509 -new -key ca.key -days 730 -subj "/CN=PQC Apache Lab CA" \
+        -addext "basicConstraints=critical,CA:true" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign,digitalSignature" \
+        -out ca.crt && \
+    openssl genpkey -algorithm ML-DSA-87 -out server.key && \
+    openssl req -new -key server.key -subj "/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -out server.csr && \
+    openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+        -days 365 -extfile ext.cnf -extensions v3 -out server.crt && \
+    openssl verify -CAfile ca.crt server.crt && \
+    chmod 400 ca.key server.key
+
+# Second chain: classical ECDSA, for the browser-facing listener on 8444.
+# Browsers ship ML-KEM key exchange well ahead of ML-DSA certificate
+# verification; classical authentication + post-quantum confidentiality is
+# what a browser can complete today.
+RUN mkdir -p /opt/pki-ec && cd /opt/pki-ec && \
+    cp /opt/pki/ext.cnf . && \
+    openssl genpkey -algorithm ec -pkeyopt ec_paramgen_curve:P-256 -out ca.key && \
+    openssl req -x509 -new -key ca.key -days 730 -subj "/CN=PQC Apache Lab EC CA" \
+        -addext "basicConstraints=critical,CA:true" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign,digitalSignature" \
+        -out ca.crt && \
+    openssl genpkey -algorithm ec -pkeyopt ec_paramgen_curve:P-256 -out server.key && \
+    openssl req -new -key server.key -subj "/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -out server.csr && \
+    openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+        -days 365 -extfile ext.cnf -extensions v3 -out server.crt && \
+    openssl verify -CAfile ca.crt server.crt && \
+    chmod 400 ca.key server.key
+
+# Wire the TLS configuration in and validate the syntax at build time —
+# a config error should fail the build, not the reader's first run.
+COPY docker-labs/apache-pqc.conf /opt/httpd/conf/extra/apache-pqc.conf
+RUN sed -i 's/^#\(LoadModule ssl_module\)/\1/' /opt/httpd/conf/httpd.conf && \
+    sed -i 's/^#\(LoadModule socache_shmcb_module\)/\1/' /opt/httpd/conf/httpd.conf && \
+    echo 'Include conf/extra/apache-pqc.conf' >> /opt/httpd/conf/httpd.conf && \
+    /opt/httpd/bin/httpd -t
+
+COPY docker-labs/apache-entrypoint.sh /opt/apache-entrypoint.sh
+RUN chmod +x /opt/apache-entrypoint.sh
+
+EXPOSE 8443 8444 8445
+ENTRYPOINT ["/opt/apache-entrypoint.sh"]

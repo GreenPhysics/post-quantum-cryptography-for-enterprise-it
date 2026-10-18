@@ -1,0 +1,4 @@
+basicConstraints=critical,CA:TRUE
+keyUsage=critical,keyCertSign,cRLSign
+subjectKeyIdentifier=E52BBE18C1940C6AC932ED05C53A6D3F0E2B8A0F
+authorityKeyIdentifier=none

@@ -1,0 +1,56 @@
+Post-Quantum Cryptography for Enterprise IT — companion laboratory apparatus
+Copyright 2026 John R. Schultz
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+the files under labs/, docker-labs/ and product/ except in compliance with the
+License. You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+
+Scope. The License above covers the laboratory scripts, container definitions,
+Terraform configurations, runbooks, ceremony tools and public transcripts in
+labs/, docker-labs/ and product/. The manuscript (chapters/, figures/) and the
+research notes are the text of the book and are NOT covered by this License;
+see the copyright line in chapters/00-front-matter.md.
+
+Attributions.
+
+  * Laboratory methodology and the private certificate authority structure
+    derive from f5devcentral/openssl-pqc-stepbystep-lab, released under the
+    MIT License, Copyright (c) F5, Inc. The MIT notice is reproduced below as
+    that license requires.
+
+  * EJBCA(R) Community Edition is developed by Keyfactor and distributed under
+    the GNU Lesser General Public License v2.1 or later. This repository
+    operates the published container image unmodified, identified by digest,
+    and contains no EJBCA source. EJBCA is a registered trademark of Keyfactor;
+    this work is independent of and not endorsed by Keyfactor.
+
+  * PostgreSQL, OpenSSL, nginx, Apache httpd, Apache Tomcat and Eclipse Temurin
+    are used as published by their respective projects, under their own
+    licenses, and are not redistributed here.
+
+---- MIT License notice for f5devcentral/openssl-pqc-stepbystep-lab ----
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

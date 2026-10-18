@@ -1,0 +1,131 @@
+# PQC nginx — post-quantum TLS at the edge, statically linked, on Red Hat UBI.
+#
+# The Apache image proved that a dynamically linked TLS module silently binds
+# whatever libssl.so.3 the loader finds — PQC-capable or not. This image takes
+# the other road: nginx's --with-openssl compiles OpenSSL 3.5.x INTO the
+# binary. There is no libssl dependency, so there is nothing to substitute,
+# on any host, ever. One binary, one answer.
+#
+# What this image demonstrates, end to end:
+#   1. nginx 1.30.x statically linked against OpenSSL 3.5.x (ML-DSA + ML-KEM)
+#   2. A full post-quantum handshake: ML-DSA-87 chain + ML-KEM key exchange
+#   3. TLS groups set per server block (ssl_conf_command Groups)
+#   4. CNSA 2.0 STRICT posture: classical-only clients refused (alert 40)
+#   5. Dual certificates (ML-DSA + ECDSA) on one listener — the migration
+#      bridge, no flag day
+#   6. The negotiated group in the access log ($ssl_curve) — per-connection
+#      post-quantum evidence Apache's mod_ssl cannot produce
+#   7. A PQC-terminating load balancer: ML-KEM outside, a round-robin pool
+#      of classical HTTP backends inside — the edge architecture for
+#      backends that cannot do PQC themselves
+#
+# Build (tarballs in docker-labs/vendor/):
+#   openssl-3.5.7.tar, nginx-1.30.4.tar
+#   docker build -f docker-labs/Dockerfile.nginx -t pqc-nginx .
+#
+# Run (host ports 95xx to avoid colliding with the Tomcat/Apache images):
+#   docker run --rm pqc-nginx verify
+#   docker run --rm -d --name pqc-nginx \
+#     -p 9543:8443 -p 9544:8444 -p 9545:8445 -p 9546:8446 -p 9547:8447 pqc-nginx
+
+ARG UBI_TAG=latest
+ARG OPENSSL_VERSION=3.5.7
+ARG NGINX_VERSION=1.30.4
+
+# ---------------------------------------------------------------- stage 1
+FROM registry.access.redhat.com/ubi9/ubi:${UBI_TAG} AS build
+ARG OPENSSL_VERSION
+ARG NGINX_VERSION
+# Perl modules: OpenSSL's Configure needs FindBin and IPC::Cmd (nginx invokes
+# it internally for --with-openssl). pcre2-devel and zlib-devel: nginx's
+# rewrite engine and gzip.
+RUN dnf install -y gcc make tar findutils pcre2-devel zlib-devel \
+        perl perl-FindBin perl-IPC-Cmd perl-Data-Dumper perl-File-Compare \
+        perl-File-Copy perl-Pod-Html && \
+    dnf clean all
+
+COPY docker-labs/vendor/openssl-${OPENSSL_VERSION}.tar* \
+     docker-labs/vendor/nginx-${NGINX_VERSION}.tar* /tmp/
+RUN cd /tmp && \
+    tar -xf openssl-${OPENSSL_VERSION}.tar* && \
+    tar -xf nginx-${NGINX_VERSION}.tar* && \
+    cd nginx-${NGINX_VERSION}/ && \
+    ./configure --prefix=/opt/nginx \
+        --with-http_ssl_module \
+        --with-http_v2_module \
+        --with-openssl=/tmp/openssl-${OPENSSL_VERSION} \
+        --with-openssl-opt="no-docs no-tests" && \
+    make -j"$(nproc)" && \
+    make install
+    # --with-openssl builds OpenSSL inside the nginx tree with no-shared and
+    # links it statically. Verified consequence: `ldd nginx` lists no libssl
+    # or libcrypto at all — the substitution failure class of the Apache
+    # chapter is structurally impossible here.
+
+# The side-build also produces the OpenSSL CLI (used below for PKI and by the
+# entrypoint for probes) — but installs it with install_sw only, so it ships
+# NO default openssl.cnf and a bare `openssl req` fails (the same trap as
+# finding #19, resurfacing through nginx's build path). The source tree's
+# apps/openssl.cnf supplies the default.
+RUN mkdir -p /tmp/openssl-${OPENSSL_VERSION}/.openssl/ssl && \
+    cp /tmp/openssl-${OPENSSL_VERSION}/apps/openssl.cnf \
+       /tmp/openssl-${OPENSSL_VERSION}/.openssl/ssl/openssl.cnf && \
+    cp -r /tmp/openssl-${OPENSSL_VERSION}/.openssl /opt/openssl-cli
+
+# ---------------------------------------------------------------- stage 2
+FROM registry.access.redhat.com/ubi9/ubi:${UBI_TAG}
+
+COPY --from=build /opt/nginx       /opt/nginx
+COPY --from=build /opt/openssl-cli /opt/openssl
+ENV PATH="/opt/openssl/bin:/opt/nginx/sbin:${PATH}" \
+    OPENSSL_CONF="/opt/openssl/ssl/openssl.cnf"
+# No LD_LIBRARY_PATH anywhere in this image: nginx and the CLI are both
+# statically linked. OPENSSL_CONF points the relocated CLI at its config.
+
+RUN dnf install -y pcre2 procps-ng && dnf clean all
+
+# Post-quantum certificate chain, generated at build time. CA and leaf both
+# ML-DSA-87 — the only signature algorithm CNSA 2.0 permits for this role.
+RUN mkdir -p /opt/pki && cd /opt/pki && \
+    printf '[v3]\nbasicConstraints = CA:FALSE\nkeyUsage = critical, digitalSignature\nextendedKeyUsage = serverAuth\nsubjectAltName = DNS:localhost,IP:127.0.0.1\n' > ext.cnf && \
+    openssl genpkey -algorithm ML-DSA-87 -out ca.key && \
+    openssl req -x509 -new -key ca.key -days 730 -subj "/CN=PQC nginx Lab CA" \
+        -addext "basicConstraints=critical,CA:true" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign,digitalSignature" \
+        -out ca.crt && \
+    openssl genpkey -algorithm ML-DSA-87 -out server.key && \
+    openssl req -new -key server.key -subj "/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -out server.csr && \
+    openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+        -days 365 -extfile ext.cnf -extensions v3 -out server.crt && \
+    openssl verify -CAfile ca.crt server.crt && \
+    chmod 400 ca.key server.key
+
+# Second chain: classical ECDSA, for the browser listener (8444) and the
+# dual-certificate listener (8446). Distinct CA name — running this image
+# alongside the Tomcat/Apache images must not produce keychain collisions.
+RUN mkdir -p /opt/pki-ec && cd /opt/pki-ec && \
+    cp /opt/pki/ext.cnf . && \
+    openssl genpkey -algorithm ec -pkeyopt ec_paramgen_curve:P-256 -out ca.key && \
+    openssl req -x509 -new -key ca.key -days 730 -subj "/CN=PQC nginx Lab EC CA" \
+        -addext "basicConstraints=critical,CA:true" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign,digitalSignature" \
+        -out ca.crt && \
+    openssl genpkey -algorithm ec -pkeyopt ec_paramgen_curve:P-256 -out server.key && \
+    openssl req -new -key server.key -subj "/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -out server.csr && \
+    openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+        -days 365 -extfile ext.cnf -extensions v3 -out server.crt && \
+    openssl verify -CAfile ca.crt server.crt && \
+    chmod 400 ca.key server.key
+
+# Wire in the TLS configuration and validate it at build time — a config
+# error should fail the build, not the reader's first run.
+COPY docker-labs/nginx-pqc.conf /opt/nginx/conf/nginx.conf
+RUN /opt/nginx/sbin/nginx -t
+
+COPY docker-labs/nginx-entrypoint.sh /opt/nginx-entrypoint.sh
+RUN chmod +x /opt/nginx-entrypoint.sh
+
+EXPOSE 8443 8444 8445 8446 8447
+ENTRYPOINT ["/opt/nginx-entrypoint.sh"]

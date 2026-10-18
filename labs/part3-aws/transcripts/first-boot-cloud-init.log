@@ -1,0 +1,30 @@
+# Part III — first-boot cloud-init transcript (EC2 serial console, 2026-09-06)
+# Instance i-015ccf99bac2a582b, AL2023, t3.large. Key lines annotated; full log as captured.
+# Chapter notes: (1) the SSM Agent AccessDeniedException below is EXPECTED and inert —
+# the agent ships in the AMI and looks for an instance role this lab deliberately does not
+# attach (least privilege: nothing on the host needs to call AWS). (2) The SSH host key
+# fingerprints printed here are the out-of-band channel that converts trust-on-first-use
+# into verification — compare at first SSH. (3) Total first boot: 83.98 seconds.
+
+[    5.157856] cloud-init: Cloud-init v. 22.2.2 running 'init' at Sun, 06 Sep 2026 21:34:11 +0000. Up 5.12 seconds.
+[    5.245105] ci-info: ens5 True 10.44.0.13 255.255.255.192 global
+[    6.494709] SSH host key (ED25519): SHA256:lT54BlkC7u+oFdoeRFd8DEHKSBb8YdlhpYMckP6z2g8
+[    6.511540] SSH host key (ECDSA):   SHA256:LUYde0eDf4DWadyt5wbcY3HDm79SodpP0+XGxFzRaLI
+21:34:13Z SSM Agent unable to acquire credentials: ... Systems Manager's instance management
+          role is not configured for account: 086097216967  [EXPECTED — no instance role attached]
+[    7.652597] + dnf -y update
+[   29.774223] Nothing to do. Complete!          [AMI already current]
+[   29.859612] + dnf -y install docker git
+[   30.623263] Total download size: 84 M (19 packages: docker 25.0.16, containerd 2.2.5, git 2.50.1, ...)
+[   68.956058] Complete!
+[   69.151995] + systemctl enable --now docker
+[   70.335953] + usermod -aG docker ec2-user
+[   70.388501] + docker pull keyfactor/ejbca-ce
+[   70.404443] Using default tag: latest
+[   83.859512] Digest: sha256:183b86af44b9b13e7cc8912c868f635aeb8dba6bf056ccbd4683b17626964d0a
+[   83.865188] Status: Downloaded newer image for keyfactor/ejbca-ce:latest
+[   83.872074] + docker inspect --format '{{index .RepoDigests 0}}' keyfactor/ejbca-ce
+[   83.892352] + chown ec2-user:ec2-user /home/ec2-user/EJBCA-IMAGE-DIGEST.txt
+[   83.896286] + install -d -o ec2-user -g ec2-user /opt/dpod
+ci-info: Authorized key for ec2-user: ssh-ed25519 (comment: pqc-lab)
+[   83.991190] Cloud-init v. 22.2.2 finished at Sun, 06 Sep 2026 21:35:32 +0000. Up 83.98 seconds.

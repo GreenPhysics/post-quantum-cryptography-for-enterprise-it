@@ -1,0 +1,13 @@
+# JDK 25 overlay: the same stack, EJBCA's runtime swapped for Temurin 25 (stack/ejbca-jdk25/Dockerfile).
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml -f docker-compose.jdk25.yml up -d ejbca
+# Revert = leave this file off the command line and `up -d ejbca` again; the database is untouched either way.
+services:
+  ejbca:
+    image: pqc-ejbca:9.3.7-jdk25
+    build:
+      context: ./ejbca-jdk25
+      args:
+        TEMURIN_SHA256: ${TEMURIN_SHA256:?set TEMURIN_SHA256 in .env (from adoptium.net for the exact tarball)}
+    environment:
+      # (b) in the Dockerfile: print the TLS handshake so the JDBC session's negotiated group is visible.
+      JAVA_OPTS_APPEND: "-Djavax.net.debug=ssl:handshake:verbose"

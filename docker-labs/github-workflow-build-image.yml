@@ -1,0 +1,38 @@
+# GitHub Actions: build the Lab Companion image and publish to ghcr.io
+#
+# INSTALL: copy this file to .github/workflows/build-image.yml in the repo.
+# Result: readers run the prebuilt image with
+#     docker run -p 8080:8080 ghcr.io/<owner>/<repo>:latest
+# or clone the repo and `docker compose up --build` in docker-labs/.
+
+name: build-lab-companion
+on:
+  push:
+    branches: [main]
+    paths: ['labs/**', 'docker-labs/**', '.github/workflows/build-image.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker-labs/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}

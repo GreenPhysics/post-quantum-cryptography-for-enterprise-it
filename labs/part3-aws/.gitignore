@@ -1,0 +1,22 @@
+# Terraform local state and workspace files — never committed: state records resource
+# details (IDs, IPs) that do not belong in a public repository, and .terraform/ is a cache.
+terraform.tfstate
+terraform.tfstate.backup
+.terraform/
+# Note: .terraform.lock.hcl is deliberately NOT ignored — it pins provider versions
+# and belongs in the repo, same discipline as every other pin in this project.
+# *.tfvars is ignored because it will carry the operator's admin_cidr and key name.
+*.tfvars
+# Chapter 18 stack secrets: the database password and the two EJBCA keys that protect the issuing CA's
+# private key at rest. The template (.env.example) is committed; the filled file never is.
+stack/.env
+# Chapter 19 TLS material and database dumps: private keys (classical and ML-DSA), CSRs, and pg_dump output,
+# which together with .env is the CA. Certificates that belong in the book go to transcripts/ by hand.
+stack/certs/
+stack/certs-stock/
+stack/*.key
+stack/*.csr
+stack/*.dump
+# JDK 25 experiment: the Temurin tarball lives in vendor/ (outside the repo) and is copied into the build
+# context on the host; it never enters the repository. Its SHA-256 goes in the pins table.
+stack/ejbca-jdk25/*.tar.gz

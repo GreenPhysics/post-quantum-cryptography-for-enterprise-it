@@ -1,0 +1,64 @@
+# Fortanix PKCS#11 client 5.6.2919 — Cryptoki 3.0 — 62 mechanisms — NO ML-DSA (Gate B, first attempt, 2026-09-17)
+# Enumerated with OpenSC 0.24.0 pkcs11-tool --list-mechanisms against amer.smartkey.io; mechtype-0x lines are AES/DES variants OpenSC cannot name.
+Using slot 0 with a present token (0x0)
+Supported mechanisms:
+  AES-CBC, keySize={16,32}, hw, encrypt, decrypt, wrap, unwrap
+  AES-CBC-ENCRYPT-DATA, keySize={128,256}, hw, derive
+  AES-CBC-PAD, keySize={16,32}, hw, encrypt, decrypt, wrap, unwrap
+  mechtype-0x2107, keySize={16,32}, hw, encrypt, decrypt, wrap, unwrap
+  AES-CMAC, keySize={16,32}, hw, sign, verify
+  AES-ECB, keySize={16,32}, hw, encrypt, decrypt, wrap, unwrap
+  AES-ECB-ENCRYPT-DATA, keySize={128,256}, hw, derive
+  AES-GCM, keySize={16,32}, hw, encrypt, decrypt, wrap, unwrap
+  AES-KEY-GEN, keySize={16,32}, hw, generate
+  mechtype-0x2104, keySize={16,32}, hw, encrypt, decrypt, wrap, unwrap
+  DES2-KEY-GEN, keySize={112,112}, hw, generate
+  DES3-CBC, keySize={168,168}, hw, encrypt, decrypt, wrap, unwrap
+  DES3-CBC-ENCRYPT-DATA, keySize={128,256}, hw, derive
+  DES3-CBC-PAD, keySize={168,168}, hw, encrypt, decrypt, wrap, unwrap
+  DES3-ECB, keySize={168,168}, hw, encrypt, decrypt, wrap, unwrap
+  DES3-ECB-ENCRYPT-DATA, keySize={128,256}, hw, derive
+  DES3-KEY-GEN, keySize={168,168}, hw, generate
+  DES-CBC, keySize={56,56}, hw, encrypt, decrypt, wrap, unwrap
+  DES-CBC-ENCRYPT-DATA, keySize={128,256}, hw, derive
+  DES-CBC-PAD, keySize={56,56}, hw, encrypt, decrypt, wrap, unwrap
+  mechtype-0x152, keySize={56,56}, hw, encrypt, decrypt, wrap, unwrap
+  DES-ECB, keySize={56,56}, hw, encrypt, decrypt, wrap, unwrap
+  DES-ECB-ENCRYPT-DATA, keySize={128,256}, hw, derive
+  DES-KEY-GEN, keySize={56,56}, hw, generate
+  mechtype-0x150, keySize={56,56}, hw, encrypt, decrypt, wrap, unwrap
+  ECDH1-DERIVE, keySize={192,521}, hw, derive
+  ECDSA, keySize={192,521}, hw, sign, verify
+  ECDSA-KEY-PAIR-GEN, keySize={192,521}, hw, generate_key_pair
+  ECDSA-SHA224, keySize={192,521}, hw, sign, verify
+  ECDSA-SHA256, keySize={192,521}, hw, sign, verify
+  ECDSA-SHA384, keySize={192,521}, hw, sign, verify
+  ECDSA-SHA512, keySize={192,521}, hw, sign, verify
+  EC-EDWARDS-KEY-PAIR-GEN, keySize={255,255}, hw, generate_key_pair
+  EDDSA, keySize={255,255}, hw, sign, verify
+  GENERIC-SECRET-KEY-GEN, keySize={112,8192}, hw, generate
+  RSA-PKCS, keySize={1024,8192}, hw, encrypt, decrypt, sign, verify, wrap, unwrap
+  RSA-PKCS-KEY-PAIR-GEN, keySize={1024,8192}, hw, generate_key_pair
+  RSA-PKCS-OAEP, keySize={1024,8192}, hw, encrypt, decrypt, wrap, unwrap
+  RSA-PKCS-PSS, keySize={1024,8192}, hw, sign, verify
+  RSA-X-509, keySize={1024,8192}, hw, encrypt, decrypt, wrap, unwrap
+  SHA-1, hw, digest
+  SHA-1-HMAC, keySize={112,8192}, hw, sign, verify
+  SHA1-RSA-PKCS, keySize={1024,8192}, hw, encrypt, decrypt, sign, verify, wrap, unwrap
+  SHA1-RSA-PKCS-PSS, keySize={1024,8192}, hw, sign, verify
+  SHA224, hw, digest
+  SHA224-HMAC, keySize={112,8192}, hw, sign, verify
+  SHA224-RSA-PKCS, keySize={1024,8192}, hw, encrypt, decrypt, sign, verify, wrap, unwrap
+  SHA224-RSA-PKCS-PSS, keySize={1024,8192}, hw, sign, verify
+  SHA256, hw, digest
+  SHA256-HMAC, keySize={112,8192}, hw, sign, verify
+  SHA256-RSA-PKCS, keySize={1024,8192}, hw, encrypt, decrypt, sign, verify, wrap, unwrap
+  SHA256-RSA-PKCS-PSS, keySize={1024,8192}, hw, sign, verify
+  SHA384, hw, digest
+  SHA384-HMAC, keySize={112,8192}, hw, sign, verify
+  SHA384-RSA-PKCS, keySize={1024,8192}, hw, encrypt, decrypt, sign, verify, wrap, unwrap
+  SHA384-RSA-PKCS-PSS, keySize={1024,8192}, hw, sign, verify
+  SHA512, hw, digest
+  SHA512-HMAC, keySize={112,8192}, hw, sign, verify
+  SHA512-RSA-PKCS, keySize={1024,8192}, hw, encrypt, decrypt, sign, verify, wrap, unwrap
+  SHA512-RSA-PKCS-PSS, keySize={1024,8192}, hw, sign, verify

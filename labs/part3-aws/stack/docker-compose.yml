@@ -1,0 +1,66 @@
+# PQC Book Part III, Chapter 18 - the CA stack, declared.
+# EJBCA Community on PostgreSQL, two named volumes, a restart policy, and no secret in this file.
+# Bring-up and verification: ../runbook-04-postgres-compose.md. Secrets: ./.env (git-ignored; template in .env.example).
+#
+# Why this file exists at all: the Chapter 17 dry run was one `docker run` with no restart policy and no declared
+# volume. It survived a reboot only because the image author had declared VOLUME /mnt/persistent for us, and it did not
+# come back up after that reboot because nothing told Docker to start it (Chapter 18, Section 18.2). Everything the
+# dry run left to luck is written down here.
+
+name: pqc-ca
+
+services:
+  db:
+    # Pinned 2026-09-26 (Runbook 05 Phase B): postgres:18 = PostgreSQL 18.6 on Debian 13 (trixie), OpenSSL 3.5.7.
+    # Chapter 18 ran on postgres:17 (17.11, same base, same OpenSSL — postgres@sha256:f4c66b82…1232); Chapter 19 moved
+    # to 18 because 17's ssl_ecdh_curve resolves names in OpenSSL's elliptic-curve table ("ECDH: unrecognized curve
+    # name: X25519MLKEM768") while 18's ssl_groups hands the list to the library. Same libssl, one API call apart.
+    # The 17-bookworm variant (Debian 12, OpenSSL 3.0.20, postgres@sha256:639ab7ce…b652) remains the library control.
+    image: postgres@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ejbca
+      POSTGRES_USER: ejbca
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - pgdata18:/var/lib/postgresql      # 18 moved PGDATA under /var/lib/postgresql (17 used /var/lib/postgresql/data)
+    ports:
+      # Loopback only: for the psql and openssl s_client probes run from the host (Chapters 18 and 19).
+      # The security group never opens 5432, and this binding would not reach it if it did.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ejbca -d ejbca"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  ejbca:
+    # Same digest as docker-labs/vendor/EJBCA-VERSIONS.md and Chapter 17 Section 17.6. Never a tag.
+    image: keyfactor/ejbca-ce@sha256:183b86af44b9b13e7cc8912c868f635aeb8dba6bf056ccbd4683b17626964d0a
+    restart: unless-stopped
+    hostname: ejbca
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # The bundled PostgreSQL JDBC driver; URL form from the image's own documentation.
+      DATABASE_JDBC_URL: jdbc:postgresql://db/ejbca
+      DATABASE_USER: ejbca
+      DATABASE_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      # The two values that turn "a copy of the database" into "a copy of the issuing CA's private key" (Section 18.3).
+      # PASSWORD_ENCRYPTION_KEY encrypts stored passwords, including crypto-token passwords, with PBE;
+      # CA_KEYSTOREPASS protects the software crypto tokens that hold CA private keys in the database.
+      PASSWORD_ENCRYPTION_KEY: ${PASSWORD_ENCRYPTION_KEY:?set PASSWORD_ENCRYPTION_KEY in .env}
+      CA_KEYSTOREPASS: ${CA_KEYSTOREPASS:?set CA_KEYSTOREPASS in .env}
+      # Unchanged from the dry run: the container's own self-issued TLS, no client-certificate requirement.
+      TLS_SETUP_ENABLED: "simple"
+    ports:
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      # Declared this time. With the database external, this holds the container's bootstrap material rather than the CA.
+      - ejbca-persistent:/mnt/persistent
+
+volumes:
+  pgdata18:
+  ejbca-persistent:

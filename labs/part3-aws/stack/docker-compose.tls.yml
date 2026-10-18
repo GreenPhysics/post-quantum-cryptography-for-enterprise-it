@@ -1,0 +1,15 @@
+# Chapter 19 overlay: the Chapter 18 stack with TLS switched on at the database and required of EJBCA.
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+# ssl_groups is PostgreSQL 18's parameter (17's ssl_ecdh_curve cannot name a KEM group - measured 2026-09-26); the
+# list leads with the hybrid so a capable client gets it and a classical client falls back. Same uid (999). The certificate and key under ./certs are read at every start, so the Phase C swap to an
+# ML-DSA-65 server certificate is a file change and a `restart db`, not a re-init.
+services:
+  db:
+    command: ["postgres", "-c", "ssl=on", "-c", "ssl_cert_file=/certs/server.crt", "-c", "ssl_key_file=/certs/server.key", "-c", "ssl_min_protocol_version=TLSv1.3", "-c", "ssl_groups=X25519MLKEM768:X25519:prime256v1"]
+    volumes:
+      - ./certs:/certs:ro              # appended to the base file's pgdata mount; key owned by 999:999, mode 0600
+  ejbca:
+    environment:
+      # pgjdbc: sslmode=require encrypts without validating the server certificate (Java's trust store knows nothing
+      # of our CA). Whether Java 17 completes the handshake once the certificate is ML-DSA is Phase C's measurement.
+      DATABASE_JDBC_URL: jdbc:postgresql://db/ejbca?ssl=true&sslmode=require

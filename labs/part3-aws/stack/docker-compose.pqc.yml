@@ -1,0 +1,19 @@
+# APPENDIX overlay (Chapter 19, "Route B"): the database rebuilt on the Amazon Linux 2023 base, for readers whose
+# PostgreSQL image is NOT already linked against an ML-KEM-capable OpenSSL. Measured 2026-09-20, the official
+# postgres:17 image (Debian 13) already links OpenSSL 3.5.7, so the book's experiment uses docker-compose.tls.yml
+# and the 17-bookworm tag as its control; this file is kept as the route for an older or non-Debian base.
+#   docker compose -f docker-compose.yml -f docker-compose.pqc.yml up -d
+# The AL2023 package keeps its data at /var/lib/pgsql/data under uid 26; the stock image's volume (uid 999,
+# /var/lib/postgresql/data) is not reusable, so this overlay declares its own volume and the data moves with
+# pg_dump / pg_restore (Runbook 05, Appendix) - the backup path Section 18.3 calls key custody, exercised on purpose.
+services:
+  db:
+    image: pqc-postgres:17-al2023          # built locally from stack/postgres-al2023/; record `docker images` ID in the pins table
+    volumes: !override
+      - pgdata-al2023:/var/lib/pgsql/data
+      - ./certs-al2023:/certs:ro         # key owned by 26:26, mode 0600
+  ejbca:
+    environment:
+      DATABASE_JDBC_URL: jdbc:postgresql://db/ejbca?ssl=true&sslmode=require
+volumes:
+  pgdata-al2023:

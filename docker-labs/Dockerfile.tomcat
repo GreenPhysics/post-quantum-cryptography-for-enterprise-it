@@ -1,0 +1,174 @@
+# PQC Tomcat — post-quantum TLS in an application server, on Red Hat UBI
+#
+# Base: Red Hat Universal Base Image. UBI is freely redistributable and
+# rebuildable without a subscription, and it matches what enterprise and
+# federal sites actually run — the audience most affected by the CNSA 2.0
+# requirements this book covers.
+#
+# Why a container at all: on macOS this experiment is defeated by platform
+# accidents. System Integrity Protection strips DYLD_* from hardened binaries,
+# Apple ships LibreSSL as /usr/lib/libssl.dylib (no post-quantum support of any
+# kind), and package-manager builds compete with source builds in PATH. A
+# Tomcat FFM connector there binds LibreSSL 3.3.6 and reports success. On Linux
+# the loader is predictable and every component below is pinned, so the result
+# reproduces on any reader's machine.
+#
+# What this image demonstrates, end to end:
+#   1. OpenSSL 3.5.x built from source, with ML-DSA and ML-KEM
+#   2. A CA and server certificate chain signed with ML-DSA-87 (FIPS 204),
+#      the only signature algorithm CNSA 2.0 permits
+#   3. Tomcat serving TLS through OpenSSL (FFM/Panama) instead of JSSE
+#   4. A handshake JSSE cannot perform: ML-DSA chain + ML-KEM key exchange
+#   5. A CNSA 2.0 profile: ML-DSA-87, ML-KEM-1024, AES-256-GCM
+#
+# Build:
+#   1. Place the JDK tarball in docker-labs/vendor/ (Linux, matching arch,
+#      JDK 24+ — the Foreign Function & Memory API is required):
+#        docker-labs/vendor/jdk.tar.gz
+#   2. docker build -f docker-labs/Dockerfile.tomcat -t pqc-tomcat .
+#
+# Run:
+#   docker run --rm pqc-tomcat verify        # run the proofs, print PASS/FAIL
+#   docker run --rm -p 8443:8443 pqc-tomcat  # serve; probe from the host
+
+ARG UBI_TAG=latest
+ARG OPENSSL_VERSION=3.5.7
+ARG TOMCAT_VERSION=11.0.24
+
+# ---------------------------------------------------------------- stage 1
+# Compile the exact OpenSSL the book pins. The base image's own OpenSSL
+# version is irrelevant — nothing here links against it.
+FROM registry.access.redhat.com/ubi9/ubi:${UBI_TAG} AS build
+ARG OPENSSL_VERSION
+# OpenSSL's Configure needs several Perl modules that RHEL splits into
+# separate packages (FindBin and IPC::Cmd in particular); installing bare
+# "perl" is not sufficient and fails late, during Configure.
+RUN dnf install -y gcc make zlib-devel tar findutils \
+        perl perl-FindBin perl-IPC-Cmd perl-Data-Dumper perl-File-Compare \
+        perl-File-Copy perl-Pod-Html && \
+    dnf clean all
+COPY docker-labs/vendor/openssl-${OPENSSL_VERSION}.tar* /tmp/
+RUN cd /tmp && \
+    tar -xf openssl-${OPENSSL_VERSION}.tar* && \
+    cd openssl-${OPENSSL_VERSION} && \
+    ./Configure --prefix=/opt/openssl --libdir=lib no-docs && \
+    make -j"$(nproc)" && \
+    make install_sw install_ssldirs
+    # install_ssldirs is not optional: without it there is no default
+    # openssl.cnf and a bare `openssl req` fails. See labs/REQUIREMENTS.md.
+
+# ---------------------------------------------------------------- stage 2
+FROM registry.access.redhat.com/ubi9/ubi:${UBI_TAG}
+ARG TOMCAT_VERSION
+
+COPY --from=build /opt/openssl /opt/openssl
+ENV PATH="/opt/openssl/bin:/opt/java/bin:${PATH}" \
+    LD_LIBRARY_PATH="/opt/openssl/lib" \
+    JAVA_HOME="/opt/java" \
+    CATALINA_HOME="/opt/tomcat" \
+    JAVA_OPTS="--enable-native-access=ALL-UNNAMED"
+# LD_LIBRARY_PATH is how the FFM connector finds OpenSSL 3.5; without it the
+# loader would fall back to the base image's system library. JAVA_OPTS grants
+# the native-access permission the FFM API requires.
+
+RUN dnf install -y tar procps-ng && dnf clean all
+
+# JDK 24+ from a pinned tarball rather than a distribution package: UBI 9 does
+# not carry a JDK new enough for the Foreign Function & Memory API, and pinning
+# keeps the build reproducible. No JSSE post-quantum support is needed — TLS
+# runs entirely through OpenSSL.
+# TARGETARCH is supplied automatically by buildx ("amd64" or "arm64"), so one
+# definition serves the x86_64 RHEL production target and arm64 build hosts.
+# Place both tarballs in vendor/; the unused one is simply not extracted.
+ARG TARGETARCH
+COPY docker-labs/vendor/jdk-*.tar.gz /tmp/jdk/
+RUN mkdir -p /opt/java && \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) JDK=/tmp/jdk/jdk-x64.tar.gz ;; \
+      arm64) JDK=/tmp/jdk/jdk-aarch64.tar.gz ;; \
+      *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    echo "using $JDK for ${TARGETARCH:-amd64}" && \
+    tar -xzf "$JDK" -C /opt/java --strip-components=1 && \
+    rm -rf /tmp/jdk && java -version
+
+COPY docker-labs/vendor/apache-tomcat-${TOMCAT_VERSION}.tar.gz /tmp/tomcat.tar.gz
+RUN mkdir -p /opt/tomcat && tar -xzf /tmp/tomcat.tar.gz -C /opt/tomcat --strip-components=1 && \
+    rm /tmp/tomcat.tar.gz && \
+    rm -rf /opt/tomcat/webapps/examples /opt/tomcat/webapps/docs
+
+# Post-quantum certificate chain, generated at build time so the image is
+# self-contained. CA and leaf both ML-DSA-87 — the only signature algorithm CNSA 2.0 permits.
+# This exact sequence was validated against OpenSSL 3.5.7 before being
+# committed — it yields Signature Algorithm ML-DSA-87 over an ML-DSA-87
+# public key, SANs preserved, and `openssl verify` returning OK.
+RUN mkdir -p /opt/pki && cd /opt/pki && \
+    printf '[v3]\nbasicConstraints = CA:FALSE\nkeyUsage = critical, digitalSignature\nextendedKeyUsage = serverAuth\nsubjectAltName = DNS:localhost,IP:127.0.0.1\n' > ext.cnf && \
+    openssl genpkey -algorithm ML-DSA-87 -out ca.key && \
+    openssl req -x509 -new -key ca.key -days 730 -subj "/CN=PQC Tomcat Lab CA" \
+        -addext "basicConstraints=critical,CA:true" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign,digitalSignature" \
+        -out ca.crt && \
+    openssl genpkey -algorithm ML-DSA-87 -out server.key && \
+    openssl req -new -key server.key -subj "/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -out server.csr && \
+    openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+        -days 365 -extfile ext.cnf -extensions v3 -out server.crt && \
+    openssl verify -CAfile ca.crt server.crt && \
+    chmod 400 ca.key server.key
+
+# Second chain: classical ECDSA, for the browser-facing connector on 8444.
+# Browsers ship ML-KEM key exchange well ahead of ML-DSA certificate
+# verification, so this pairing — classical authentication, post-quantum
+# confidentiality — is what a browser can actually complete today, and is the
+# configuration most enterprises should deploy first.
+RUN mkdir -p /opt/pki-ec && cd /opt/pki-ec && \
+    cp /opt/pki/ext.cnf . && \
+    openssl genpkey -algorithm ec -pkeyopt ec_paramgen_curve:P-256 -out ca.key && \
+    openssl req -x509 -new -key ca.key -days 730 -subj "/CN=PQC Lab EC CA" \
+        -addext "basicConstraints=critical,CA:true" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign,digitalSignature" \
+        -out ca.crt && \
+    openssl genpkey -algorithm ec -pkeyopt ec_paramgen_curve:P-256 -out server.key && \
+    openssl req -new -key server.key -subj "/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -out server.csr && \
+    openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+        -days 365 -extfile ext.cnf -extensions v3 -out server.crt && \
+    openssl verify -CAfile ca.crt server.crt && \
+    chmod 400 ca.key server.key
+
+# CNSA 2.0 baseline, enforced where it can actually be enforced.
+#
+# Tomcat's SSLHostConfig exposes ciphers and protocols but not TLS named
+# groups, so ML-KEM-1024 cannot be selected from server.xml. It does not need
+# to be: the FFM connector uses a standard OpenSSL library context, which reads
+# its own configuration. Setting the groups here — one layer below the
+# application server — is what makes the profile achievable.
+#
+# Verified: with this in place, a client offering only MLKEM1024 negotiates it,
+# and a client offering both the hybrid and MLKEM1024 gets MLKEM1024, because
+# server preference wins.
+RUN printf '%s\n' \
+    'openssl_conf = default_conf' \
+    '' \
+    '[default_conf]' \
+    'ssl_conf = ssl_sect' \
+    '' \
+    '[ssl_sect]' \
+    'system_default = system_default_sect' \
+    '' \
+    '[system_default_sect]' \
+    '# CNSA 2.0: ML-KEM-1024 for key establishment, AES-256 for confidentiality.' \
+    '# SecP384r1MLKEM1024 is listed second for clients that require a hybrid.' \
+    'Groups = MLKEM1024:SecP384r1MLKEM1024:X25519MLKEM768' \
+    'CipherSuites = TLS_AES_256_GCM_SHA384' \
+    '' \
+    | cat - /opt/openssl/ssl/openssl.cnf > /tmp/o.cnf && \
+    mv /tmp/o.cnf /opt/openssl/ssl/openssl.cnf
+
+COPY docker-labs/tomcat-server.xml /opt/tomcat/conf/server.xml
+COPY docker-labs/tomcat-entrypoint.sh /opt/tomcat-entrypoint.sh
+RUN chmod +x /opt/tomcat-entrypoint.sh
+
+EXPOSE 8443 8444
+ENTRYPOINT ["/opt/tomcat-entrypoint.sh"]

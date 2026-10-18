@@ -1,0 +1,7 @@
+[ca]
+default_ca = root
+[root]
+database = index.txt
+crlnumber = crlnumber
+default_crl_days = 30
+default_md = default

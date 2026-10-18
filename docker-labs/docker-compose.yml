@@ -1,0 +1,21 @@
+services:
+  # PQC Tomcat: post-quantum TLS in an application server, via OpenSSL FFM.
+  #   docker compose run --rm pqc-tomcat verify   → run the proofs and exit
+  #   docker compose up pqc-tomcat                → serve on https://localhost:8443
+  pqc-tomcat:
+    build:
+      context: ..
+      dockerfile: docker-labs/Dockerfile.tomcat
+    image: pqc-tomcat:local
+    ports:
+      - "8443:8443"
+
+  pqc-labs:
+    build:
+      context: ..
+      dockerfile: docker-labs/Dockerfile
+    image: pqc-lab-companion:local
+    ports:
+      - "8080:8080"
+    # Labs are self-contained; no volumes or configuration required.
+    # docker compose up --build  →  http://localhost:8080

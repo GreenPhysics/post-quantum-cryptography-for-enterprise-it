@@ -1,0 +1,41 @@
+#!/bin/bash
+# Fleet node bring-up (Chapter 21). Amazon Linux 2023: nginx and OpenSSL 3.5.7 from the distribution.
+# The node generates its OWN ML-DSA-65 key and a CSR at first boot (USERGENERATED: the CA never sees the key),
+# serves TLS 1.3 with a self-signed placeholder until the operator installs the CA-issued certificate with
+# /usr/local/bin/pqc-install-cert, and offers the hybrid group first.
+set -euxo pipefail
+dnf -y install nginx openssl
+install -d -m 0755 /etc/pqc
+cd /etc/pqc
+openssl genpkey -algorithm ML-DSA-65 -out server.key
+chmod 0600 server.key
+openssl req -new -key server.key -subj "/CN=${node_name}/O=PQC Book Part3/C=US" \
+  -addext "subjectAltName=DNS:${node_name}" -out server.csr
+# placeholder so nginx starts before the CA has issued anything; replaced by pqc-install-cert
+openssl x509 -req -in server.csr -signkey server.key -days 7 -copy_extensions copy -out server.crt
+echo "${node_name}" > node-name
+cat > /etc/nginx/conf.d/pqc.conf <<'EOF'
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name _;
+    ssl_certificate     /etc/pqc/server.crt;
+    ssl_certificate_key /etc/pqc/server.key;
+    ssl_protocols       TLSv1.3;
+    ssl_ecdh_curve      X25519MLKEM768:X25519:prime256v1;
+    # Amazon Linux 2023's crypto policy (included from openssl.cnf) fixes Groups and SignatureAlgorithms to classical
+    # lists for every OpenSSL process, nginx included (measured 2026-10-09: alert 40 on every node until these two
+    # lines). ssl_conf_command applies after the policy, so it wins — the same layer Chapter 19 found on the client.
+    ssl_conf_command    Groups X25519MLKEM768:X25519:prime256v1;
+    ssl_conf_command    SignatureAlgorithms mldsa65:mldsa87:mldsa44:ecdsa_secp256r1_sha256:rsa_pss_rsae_sha256;
+    location / { return 200 "pqc node $hostname\n"; add_header Content-Type text/plain; }
+}
+EOF
+cat > /usr/local/bin/pqc-install-cert <<'EOF'
+#!/bin/bash
+# usage: pqc-install-cert <chain.pem>   (leaf first, then the issuing CA certificate)
+set -e
+cp "$1" /etc/pqc/server.crt && nginx -t && systemctl reload nginx && echo "installed: $(openssl x509 -in /etc/pqc/server.crt -noout -subject)"
+EOF
+chmod 0755 /usr/local/bin/pqc-install-cert
+systemctl enable --now nginx

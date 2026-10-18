@@ -1,0 +1,42 @@
+#!/bin/bash
+# Part III EJBCA host bring-up. Deliberately minimal: install Docker and its two CLI plugins,
+# pre-pull the EJBCA image, record its digest for the pin file. EJBCA is NOT started here - the first start
+# is a runbook step the operator performs and transcribes (the book shows the bring-up,
+# so the bring-up must not happen invisibly in cloud-init).
+set -euxo pipefail
+
+dnf -y update
+dnf -y install docker git
+systemctl enable --now docker
+usermod -aG docker ec2-user
+
+# Pre-pull and record the digest - this value goes into docker-labs/vendor/EJBCA-VERSIONS.md
+docker pull ${ejbca_image}
+docker inspect --format '{{index .RepoDigests 0}}' ${ejbca_image} > /home/ec2-user/EJBCA-IMAGE-DIGEST.txt
+chown ec2-user:ec2-user /home/ec2-user/EJBCA-IMAGE-DIGEST.txt
+
+# Docker CLI plugins AL2023 does not package: Compose (Chapter 18) and Buildx (Appendix D).
+# Pinned to the versions the book measured; each binary is verified against the SHA-256 the
+# release publishes before it is installed. A reader who wants a newer release changes the
+# version AND the checksum together - never one without the other.
+COMPOSE_VERSION=v5.5.1
+COMPOSE_SHA256=db1889184726840f75c4f9c001048430d4f25b3be3cb084d3ddd762bc0aed576
+BUILDX_VERSION=v0.37.2
+BUILDX_SHA256=REPLACE_WITH_RELEASE_SHA256   # buildx-v0.37.2.linux-amd64 from the release checksums file
+PLUGINS=/usr/local/lib/docker/cli-plugins
+install -d "$PLUGINS"
+cd /tmp
+curl -fsSLO "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-linux-x86_64"
+echo "$COMPOSE_SHA256  docker-compose-linux-x86_64" | sha256sum -c -
+install -m 0755 docker-compose-linux-x86_64 "$PLUGINS/docker-compose"
+curl -fsSLO "https://github.com/docker/buildx/releases/download/$BUILDX_VERSION/buildx-$BUILDX_VERSION.linux-amd64"
+echo "$BUILDX_SHA256  buildx-$BUILDX_VERSION.linux-amd64" | sha256sum -c -
+install -m 0755 "buildx-$BUILDX_VERSION.linux-amd64" "$PLUGINS/docker-buildx"
+rm -f docker-compose-linux-x86_64 "buildx-$BUILDX_VERSION.linux-amd64"
+docker compose version > /home/ec2-user/DOCKER-PLUGIN-VERSIONS.txt
+docker buildx version >> /home/ec2-user/DOCKER-PLUGIN-VERSIONS.txt
+chown ec2-user:ec2-user /home/ec2-user/DOCKER-PLUGIN-VERSIONS.txt
+
+# Placeholder directory for the Luna Cloud HSM client bundle (uploaded by operator later;
+# credentials never bake into images or user-data).
+install -d -o ec2-user -g ec2-user /opt/dpod
